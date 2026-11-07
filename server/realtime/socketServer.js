@@ -6,6 +6,7 @@ const examRoom = (examId) => `exam:${examId}`;
 const studentRoom = (studentId) => `student:${studentId}`;
 const sendAck = (ack, result) => { if (typeof ack === 'function') ack(result); };
 let activeIO;
+export const getSocketIO = () => activeIO;
 const awayGraceTimers = new Map();
 const AWAY_GRACE_MS = 5000;
 const MAX_SECURITY_VIOLATIONS = 3;

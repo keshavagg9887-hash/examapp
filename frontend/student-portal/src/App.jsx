@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import './App.css';
 
@@ -18,6 +18,9 @@ function App() {
   const [terminated, setTerminated] = useState(false);
   const [terminatedMessage, setTerminatedMessage] = useState('');
   const [result, setResult] = useState(null);
+  const [resultsReleased, setResultsReleased] = useState(false);
+  const [resultDetails, setResultDetails] = useState(null);
+  const [loadingResultDetails, setLoadingResultDetails] = useState(false);
   const [questions, setQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answerError, setAnswerError] = useState('');
@@ -32,6 +35,32 @@ function App() {
   const attemptStartedRef = useRef(false);
   const loadQuestionsRef = useRef(() => {});
 
+  const loadResultDetails = useCallback(async () => {
+    if (!joinCode) return;
+    setLoadingResultDetails(true);
+    try {
+      const token = student?.accessToken || sessionStorage.getItem(`exam_token_${joinCode}`);
+      const headers = token ? { 'x-participant-token': token } : {};
+      const response = await fetch(`/api/student/exams/${encodeURIComponent(joinCode)}/result`, {
+        headers,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.resultsReleased) {
+        setResultsReleased(true);
+        setResult({
+          score: data.student.score,
+          totalMarks: data.student.totalMarks,
+          percentage: data.student.percentage,
+        });
+        setResultDetails(data);
+      }
+    } catch (err) {
+      console.error('Failed to load result details:', err);
+    } finally {
+      setLoadingResultDetails(false);
+    }
+  }, [joinCode, student?.accessToken]);
+
   useEffect(() => {
     if (!joinCode) return;
     let cancelled = false;
@@ -45,6 +74,9 @@ function App() {
         if (cancelled) return;
         setExam(data.exam);
         setStudent(data.student || null);
+        if (data.student?.accessToken) {
+          sessionStorage.setItem(`exam_token_${joinCode}`, data.student.accessToken);
+        }
         setLiveSession(data.liveSession || { status: 'waiting' });
         setAttemptEndsAt(data.student?.attemptEndsAt || null);
         setAttemptStarted(Boolean(data.student?.attemptStartedAt));
@@ -55,7 +87,14 @@ function App() {
             ? 'This attempt is locked and cannot be reopened.'
             : 'Your teacher ended this exam session.');
         }
-        if (data.student?.score != null) setResult({ score: data.student.score, totalMarks: data.exam.total_marks });
+        if (data.exam?.resultsReleased) {
+          setResultsReleased(true);
+        }
+        if (data.student?.score != null) {
+          setResult({ score: data.student.score, totalMarks: data.exam.total_marks });
+        } else if (data.student?.status === 'submitted') {
+          setResult({ submitted: true });
+        }
         setState('ready');
       })
       .catch((error) => {
@@ -65,6 +104,12 @@ function App() {
       });
     return () => { cancelled = true; };
   }, [joinCode]);
+
+  useEffect(() => {
+    if (resultsReleased && (result || student?.status === 'submitted') && !resultDetails) {
+      loadResultDetails();
+    }
+  }, [resultsReleased, result, student?.status, resultDetails, loadResultDetails]);
 
   useEffect(() => {
     if (!student?.id) return undefined;
@@ -106,7 +151,19 @@ function App() {
       setTerminated(true);
       setTerminatedMessage(data.message || 'Your teacher ended this exam session.');
     });
-    socket.on('student:result', setResult);
+    socket.on('student:result', (res) => {
+      setResult(res);
+      setResultsReleased(true);
+      loadResultDetails();
+    });
+    socket.on('exam:results_released', ({ resultsReleased: released }) => {
+      setResultsReleased(Boolean(released));
+      if (released) {
+        loadResultDetails();
+      } else {
+        setResultDetails(null);
+      }
+    });
     socket.on('student:returned', () => {
       awayActiveRef.current = false;
       setAwaySeconds(0);
@@ -115,7 +172,9 @@ function App() {
       setLiveSession(data.liveSession || { status: 'waiting' });
       const me = data.students?.find((item) => item.id === student.id);
       if (me) setAttemptEndsAt(me.attemptEndsAt || null);
-      if (me?.score != null) setResult({ score: me.score, totalMarks: exam?.total_marks, status: me.status });
+      if (me?.score != null) {
+        setResult({ score: me.score, totalMarks: exam?.total_marks, status: me.status });
+      }
       if (me?.status === 'terminated') setTerminated(true);
     });
     return () => {
@@ -123,7 +182,7 @@ function App() {
       socketRef.current = null;
       loadQuestionsRef.current = () => {};
     };
-  }, [student?.id, exam?.total_marks, joinCode]);
+  }, [student?.id, exam?.total_marks, joinCode, loadResultDetails]);
 
   useEffect(() => {
     attemptStartedRef.current = attemptStarted;
@@ -173,28 +232,21 @@ function App() {
     };
     const recordBlockedAction = (kind, details) => (event) => {
       event.preventDefault();
-      socketRef.current?.emit('student:violation', { kind, details });
+      socketRef.current?.emit('student:security_violation', { kind, details });
     };
-    const onCopy = recordBlockedAction('copy', 'Copy was blocked during the exam.');
-    const onCut = recordBlockedAction('cut', 'Cut was blocked during the exam.');
-    const onPaste = recordBlockedAction('paste', 'Paste was blocked during the exam.');
-    const onContextMenu = recordBlockedAction('context_menu', 'Context menu was blocked during the exam.');
+    const onCopy = recordBlockedAction('copy', 'Attempted to copy content during the exam.');
+    const onCut = recordBlockedAction('cut', 'Attempted to cut content during the exam.');
+    const onPaste = recordBlockedAction('paste', 'Attempted to paste content during the exam.');
+    const onContextMenu = recordBlockedAction('context_menu', 'Opened the context menu during the exam.');
     const onKeyDown = (event) => {
-      const key = event.key.toLowerCase();
-      const modifier = event.ctrlKey || event.metaKey;
-      const blockedCombo = (modifier && ['a', 'c', 'v', 'x', 'p', 's', 'u', 'tab', 'insert'].includes(key))
-        || (event.shiftKey && ['insert', 'delete'].includes(key))
-        || (event.altKey && ['arrowleft', 'arrowright', 'tab'].includes(key));
-      const developerCombo = modifier && event.shiftKey && ['i', 'j', 'c'].includes(key);
-      if (blockedCombo || developerCombo || key === 'f12') {
+      const key = event.key?.toLowerCase();
+      const meta = event.ctrlKey || event.metaKey;
+      if (key === 'printscreen' || (event.altKey && key === 'tab') || (meta && ['c', 'v', 'x', 'a', 'p', 's', 'r', 'f', 'u'].includes(key))) {
         event.preventDefault();
-        socketRef.current?.emit('student:violation', {
-          kind: 'blocked_shortcut', details: `Blocked keyboard shortcut: ${event.key}`,
+        socketRef.current?.emit('student:security_violation', {
+          kind: 'blocked_shortcut',
+          details: `Blocked key shortcut: ${event.ctrlKey ? 'Ctrl+' : ''}${event.altKey ? 'Alt+' : ''}${event.metaKey ? 'Meta+' : ''}${event.key}`,
         });
-      }
-      if (key === 'escape') {
-        event.preventDefault();
-        beginAway('fullscreen_exit', 'Escape key pressed during the exam.');
       }
     };
     const preventDrag = (event) => event.preventDefault();
@@ -243,6 +295,9 @@ function App() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'Could not join this exam.');
       setStudent(data.student);
+      if (data.student?.accessToken) {
+        sessionStorage.setItem(`exam_token_${joinCode}`, data.student.accessToken);
+      }
     } catch (error) {
       setJoinError(error.message);
     } finally {
@@ -303,7 +358,15 @@ function App() {
       const response = await fetch(`/api/student/exams/${encodeURIComponent(joinCode)}/submit`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'Exam could not be submitted.');
-      setResult(data.result);
+      setStudent((current) => ({ ...current, status: 'submitted' }));
+      if (data.resultsReleased) {
+        setResultsReleased(true);
+        setResult(data.result);
+        loadResultDetails();
+      } else {
+        setResultsReleased(false);
+        setResult({ submitted: true });
+      }
     } catch (error) {
       setAnswerError(error.message);
     } finally {
@@ -363,9 +426,118 @@ function App() {
               <div className="student-exam-state">
                 {warning && <div className="notice warning-notice"><strong>Message from your teacher</strong><p>{warning}</p></div>}
                 {terminated ? (
-                  <div className="notice error-notice"><h2>Attempt locked</h2><p>{terminatedMessage || 'This exam attempt has ended and cannot be reopened.'}</p>{result && <p>Score: {result.score} / {result.totalMarks ?? exam.total_marks}</p>}</div>
-                ) : result ? (
-                  <div className="notice success-notice"><strong>Exam result</strong><p>{student.fullName} · Roll number {student.rollNumber}</p><p>Score: {result.score} / {result.totalMarks ?? exam.total_marks}</p></div>
+                  <div className="notice error-notice">
+                    <h2>Attempt locked</h2>
+                    <p>{terminatedMessage || 'This exam attempt has ended and cannot be reopened.'}</p>
+                    {result && <p>Score: {result.score} / {result.totalMarks ?? exam.total_marks}</p>}
+                  </div>
+                ) : (result || student.status === 'submitted') ? (
+                  resultsReleased ? (
+                    <div className="notice success-notice" style={{ textAlign: 'left' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div>
+                          <strong style={{ fontSize: '1.2rem', display: 'block' }}>Exam Result</strong>
+                          <p style={{ margin: '0.2rem 0 0 0', color: '#475569' }}>{student.fullName} · Roll Number {student.rollNumber}</p>
+                        </div>
+                        <div style={{ background: '#dcfce7', border: '1px solid #86efac', borderRadius: '8px', padding: '0.5rem 1rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#166534' }}>
+                            {result?.score ?? resultDetails?.student?.score ?? 0} <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>/ {result?.totalMarks ?? resultDetails?.student?.totalMarks ?? exam.total_marks}</span>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>
+                            {result?.percentage ?? resultDetails?.student?.percentage ?? Math.round(((result?.score ?? 0) / (exam.total_marks || 1)) * 100)}%
+                          </div>
+                        </div>
+                      </div>
+
+                      {resultDetails?.questions && (
+                        <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+                          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem', color: '#1e293b' }}>Question Review</h3>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {resultDetails.questions.map((q, idx) => (
+                              <div key={q.id} style={{
+                                padding: '0.75rem 1rem',
+                                borderRadius: '8px',
+                                border: `1px solid ${q.isCorrect ? '#86efac' : '#fca5a5'}`,
+                                background: q.isCorrect ? '#f0fdf4' : '#fef2f2',
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                                  <span style={{ fontWeight: 600, color: '#1e293b' }}>Q{idx + 1}. {q.statement}</span>
+                                  <span style={{
+                                    padding: '0.15rem 0.5rem',
+                                    borderRadius: '9999px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    background: q.isCorrect ? '#dcfce7' : '#fee2e2',
+                                    color: q.isCorrect ? '#166534' : '#991b1b',
+                                    flexShrink: 0,
+                                    marginLeft: '0.5rem',
+                                  }}>
+                                    {q.marksAwarded} / {q.marks} marks ({q.isCorrect ? 'Correct' : 'Incorrect'})
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginLeft: '0.5rem' }}>
+                                  {q.options.map((opt) => {
+                                    const isSelected = q.selectedOptionIds?.includes(opt.id);
+                                    const isCorrectOpt = opt.isCorrect;
+                                    let itemBg = 'transparent';
+                                    let itemBorder = '#e2e8f0';
+                                    let itemColor = '#334155';
+                                    if (isCorrectOpt) {
+                                      itemBg = '#dcfce7';
+                                      itemBorder = '#86efac';
+                                      itemColor = '#166534';
+                                    }
+                                    if (isSelected && !isCorrectOpt) {
+                                      itemBg = '#fee2e2';
+                                      itemBorder = '#fca5a5';
+                                      itemColor = '#991b1b';
+                                    }
+                                    return (
+                                      <div key={opt.id} style={{
+                                        padding: '0.3rem 0.6rem',
+                                        borderRadius: '5px',
+                                        border: `1px solid ${itemBorder}`,
+                                        background: itemBg,
+                                        color: itemColor,
+                                        fontSize: '0.85rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                      }}>
+                                        <span style={{ fontWeight: 700 }}>
+                                          {isSelected ? (isCorrectOpt ? '✓' : '✗') : isCorrectOpt ? '✓' : '·'}
+                                        </span>
+                                        {opt.text}
+                                        {isCorrectOpt && <span style={{ marginLeft: 'auto', fontSize: '0.7rem', fontWeight: 600 }}>(Correct Answer)</span>}
+                                        {isSelected && !isCorrectOpt && <span style={{ marginLeft: 'auto', fontSize: '0.7rem', fontWeight: 600 }}>(Your Answer)</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="notice success-notice">
+                      <strong>Exam Submitted Successfully</strong>
+                      <p>{student.fullName} · Roll number {student.rollNumber}</p>
+                      <p style={{ marginTop: '0.5rem', color: '#475569' }}>
+                        Your responses have been recorded. Results will appear here once released by your teacher.
+                      </p>
+                      <button
+                        type="button"
+                        className="jee-secondary-button"
+                        style={{ marginTop: '0.75rem' }}
+                        disabled={loadingResultDetails}
+                        onClick={loadResultDetails}
+                      >
+                        {loadingResultDetails ? 'Checking…' : 'Check for Results'}
+                      </button>
+                    </div>
+                  )
                 ) : (
                   <div className={`notice ${liveSession.status === 'live' ? 'success-notice' : liveSession.status === 'waiting' ? 'waiting-notice' : ''}`}>
                     <strong>{liveSession.status === 'live' ? 'Exam is in progress' : liveSession.status === 'finished' ? 'Exam finished' : 'Waiting for your teacher to start the exam'}</strong>
@@ -379,7 +551,7 @@ function App() {
                         : <p>Keep this page open. The exam details are ready, and your teacher will start the exam from Live Exam Manager.</p>}
                   </div>
                 )}
-                {liveSession.status === 'live' && !result && !terminated && (
+                {liveSession.status === 'live' && !result && !terminated && student.status !== 'submitted' && (
                   <>
                     {awaySeconds > 0 && <div className="notice warning-notice" role="alert"><strong>Return to your exam now</strong><p>Your exam will be submitted if you do not return within {awaySeconds} second{awaySeconds === 1 ? '' : 's'}.</p></div>}
                     {securityError && <div className="join-error" role="alert">{securityError}</div>}

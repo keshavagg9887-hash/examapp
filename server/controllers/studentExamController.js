@@ -1,14 +1,12 @@
 import pool from '../conn.js';
-import crypto from 'node:crypto';
 import { publishExamPresence } from '../services/studentPresenceService.js';
 import { gradeParticipant } from '../services/examGradingService.js';
 import { refreshExamManager } from '../realtime/socketServer.js';
-
 export const getPublishedExamByJoinCode = async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT e.id, e.title, e.subject, e.course, e.instructions,
-              e.duration, e.total_marks, e.status, e.results_released, e.results_released_at,
+              e.duration, e.total_marks, e.status,
               s.status AS live_status, s.started_at, s.ends_at, s.finished_at
        FROM exams e LEFT JOIN exam_live_sessions s ON s.exam_id = e.id
        WHERE e.join_code = $1 AND e.status = 'published'`,
@@ -21,17 +19,15 @@ export const getPublishedExamByJoinCode = async (req, res, next) => {
     let student = null;
     if (String(req.session.student?.examId) === String(exam.id)) {
       const participant = await pool.query(
-        `SELECT terminated_at, score, status, attempt_started_at, attempt_ends_at, access_token FROM exam_participants
+        `SELECT terminated_at, score, status, attempt_started_at, attempt_ends_at FROM exam_participants
          WHERE id = $1 AND exam_id = $2`,
         [req.session.student.id, exam.id]
       );
       if (participant.rowCount) {
         student = {
           ...req.session.student,
-          accessToken: participant.rows[0].access_token || req.session.student.accessToken,
           terminated: Boolean(participant.rows[0].terminated_at),
-          score: exam.results_released ? (participant.rows[0].score == null ? null : Number(participant.rows[0].score)) : null,
-          resultsReleased: Boolean(exam.results_released),
+          score: participant.rows[0].score == null ? null : Number(participant.rows[0].score),
           status: participant.rows[0].status,
           attemptStartedAt: participant.rows[0].attempt_started_at,
           attemptEndsAt: participant.rows[0].attempt_ends_at,
@@ -40,18 +36,7 @@ export const getPublishedExamByJoinCode = async (req, res, next) => {
     }
     return res.json({
       success: true,
-      exam: {
-        id: exam.id,
-        title: exam.title,
-        subject: exam.subject,
-        course: exam.course,
-        instructions: exam.instructions,
-        duration: exam.duration,
-        total_marks: exam.total_marks,
-        status: exam.status,
-        resultsReleased: Boolean(exam.results_released),
-        resultsReleasedAt: exam.results_released_at,
-      },
+      exam,
       student,
       liveSession: {
         status: exam.live_status || 'waiting',
@@ -105,17 +90,14 @@ export const joinPublishedExam = async (req, res, next) => {
         return res.status(409).json({ success: false, message: 'This browser is already registered with a different roll number for this exam.' });
       }
     }
-
-    const newAccessToken = crypto.randomBytes(32).toString('hex');
     const participantResult = await pool.query(
-      `INSERT INTO exam_participants (exam_id, full_name, roll_number, status, last_seen_at, access_token)
-       VALUES ($1, $2, $3, 'joined', NOW(), $4)
+      `INSERT INTO exam_participants (exam_id, full_name, roll_number, status, last_seen_at)
+       VALUES ($1, $2, $3, 'joined', NOW())
        ON CONFLICT (exam_id, roll_number)
-       DO UPDATE SET full_name = EXCLUDED.full_name, status = 'joined', last_seen_at = NOW(),
-                     access_token = COALESCE(exam_participants.access_token, EXCLUDED.access_token)
+       DO UPDATE SET full_name = EXCLUDED.full_name, status = 'joined', last_seen_at = NOW()
        WHERE exam_participants.terminated_at IS NULL AND exam_participants.status <> 'submitted'
-       RETURNING id, full_name, roll_number, joined_at, last_seen_at, status, access_token`,
-      [exam.id, fullName, rollNumber, newAccessToken]
+       RETURNING id, full_name, roll_number, joined_at, last_seen_at, status`,
+      [exam.id, fullName, rollNumber]
     );
     if (!participantResult.rowCount) {
       return res.status(409).json({ success: false, message: 'This roll number already has a finished exam session.' });
@@ -125,7 +107,6 @@ export const joinPublishedExam = async (req, res, next) => {
       examId: String(exam.id),
       fullName: participantResult.rows[0].full_name,
       rollNumber: participantResult.rows[0].roll_number,
-      accessToken: participantResult.rows[0].access_token,
       joinedAt: participantResult.rows[0].joined_at,
       lastSeenAt: participantResult.rows[0].last_seen_at,
       status: participantResult.rows[0].status,
@@ -179,7 +160,7 @@ const getStudentExamContext = async (req, joinCode) => {
   const student = req.session.student;
   if (!student?.id) return { error: { status: 401, message: 'Join this exam first.' } };
   const result = await pool.query(
-    `SELECT e.id AS exam_id, e.total_marks, e.results_released, p.id AS participant_id,
+    `SELECT e.id AS exam_id, e.total_marks, p.id AS participant_id,
             p.status AS participant_status, p.terminated_at, p.extra_time_seconds,
             p.attempt_started_at, p.attempt_ends_at,
             s.status AS exam_status, s.started_at,
@@ -253,7 +234,7 @@ export const startStudentAttempt = async (req, res, next) => {
        JOIN exams e ON e.id = s.exam_id
        JOIN exam_participants p ON p.exam_id = e.id
        WHERE s.exam_id = $1 AND e.join_code = $2 AND e.status = 'published'
-          AND p.id = $3 AND p.terminated_at IS NULL AND p.status <> 'submitted'
+         AND p.id = $3 AND p.terminated_at IS NULL AND p.status <> 'submitted'
        FOR UPDATE OF s, p`,
       [student.examId, req.params.joinCode, student.id]
     );
@@ -373,147 +354,14 @@ export const submitStudentExam = async (req, res, next) => {
       [score, context.participant_id]
     );
     await client.query('COMMIT');
+    const result = { score, totalMarks: Number(context.total_marks) };
     req.session.student.submitted = true;
     await refreshExamManager(context.exam_id);
-
-    const isReleased = Boolean(context.results_released);
-    if (isReleased) {
-      return res.json({
-        success: true,
-        submitted: true,
-        resultsReleased: true,
-        result: { score, totalMarks: Number(context.total_marks) },
-      });
-    }
-
-    return res.json({
-      success: true,
-      submitted: true,
-      resultsReleased: false,
-      message: 'Your exam was submitted successfully. Results will be visible once released by your teacher.',
-    });
+    return res.json({ success: true, result });
   } catch (caught) {
     try { await client.query('ROLLBACK'); } catch {}
     return next(caught);
   } finally {
     client.release();
-  }
-};
-
-export const getStudentResult = async (req, res, next) => {
-  try {
-    const { joinCode } = req.params;
-    const examResult = await pool.query(
-      `SELECT id, title, subject, course, total_marks, results_released, results_released_at
-       FROM exams WHERE join_code = $1 AND status = 'published'`,
-      [joinCode]
-    );
-    if (!examResult.rowCount) {
-      return res.status(404).json({ success: false, message: 'Exam not found.' });
-    }
-    const exam = examResult.rows[0];
-
-    // Secure access control: Check if results have been released by teacher
-    if (!exam.results_released) {
-      return res.status(403).json({
-        success: false,
-        resultsReleased: false,
-        message: 'Results have not been released by your teacher yet.',
-      });
-    }
-
-    // Secure participant verification: Session or secret participant token ONLY
-    const authHeader = req.headers.authorization || '';
-    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-    const token = req.headers['x-participant-token'] || bearerToken;
-
-    let participant = null;
-    if (req.session.student?.id && String(req.session.student.examId) === String(exam.id)) {
-      const pResult = await pool.query(
-        `SELECT id, full_name, roll_number, status, score, joined_at, submitted_at
-         FROM exam_participants WHERE id = $1 AND exam_id = $2`,
-        [req.session.student.id, exam.id]
-      );
-      if (pResult.rowCount) participant = pResult.rows[0];
-    } else if (token) {
-      const pResult = await pool.query(
-        `SELECT id, full_name, roll_number, status, score, joined_at, submitted_at
-         FROM exam_participants WHERE access_token = $1 AND exam_id = $2`,
-        [token, exam.id]
-      );
-      if (pResult.rowCount) participant = pResult.rows[0];
-    }
-
-    if (!participant) {
-      return res.status(401).json({
-        success: false,
-        message: 'Student session or token not found. Join this exam in this browser first.',
-      });
-    }
-
-    const totalMarks = Number(exam.total_marks || 0);
-    const score = participant.score != null ? Number(participant.score) : 0;
-    const percentage = totalMarks > 0 ? Number(((score / totalMarks) * 100).toFixed(1)) : 0;
-
-    // Fetch question-by-question breakdown for this participant
-    const questionsResult = await pool.query(
-      `SELECT eq.id, eq.position, eq.question_data, ea.selected_option_ids
-       FROM exam_questions eq
-       LEFT JOIN exam_answers ea
-         ON ea.exam_question_id = eq.id AND ea.participant_id = $2
-       WHERE eq.exam_id = $1
-       ORDER BY eq.position ASC`,
-      [exam.id, participant.id]
-    );
-
-    const questions = questionsResult.rows.map((row) => {
-      const qData = row.question_data || {};
-      const options = (qData.options || []).map((opt) => ({
-        id: String(opt.id),
-        text: opt.text,
-        isCorrect: Boolean(opt.isCorrect),
-      }));
-      const selectedOptionIds = (row.selected_option_ids || []).map(String);
-      const correctOptionIds = options.filter((o) => o.isCorrect).map((o) => o.id);
-      const isCorrect = correctOptionIds.length > 0 &&
-        correctOptionIds.length === selectedOptionIds.length &&
-        correctOptionIds.every((id) => selectedOptionIds.includes(id));
-      const marksAwarded = isCorrect ? Number(qData.marks || 0) : 0;
-
-      return {
-        id: row.id,
-        position: row.position,
-        statement: qData.statement,
-        type: qData.type,
-        marks: Number(qData.marks || 0),
-        options,
-        selectedOptionIds,
-        correctOptionIds,
-        isCorrect,
-        marksAwarded,
-      };
-    });
-
-    return res.json({
-      success: true,
-      resultsReleased: true,
-      exam: {
-        title: exam.title,
-        subject: exam.subject,
-        totalMarks,
-      },
-      student: {
-        fullName: participant.full_name,
-        rollNumber: participant.roll_number,
-        score,
-        totalMarks,
-        percentage,
-        status: participant.status,
-        submittedAt: participant.submitted_at,
-      },
-      questions,
-    });
-  } catch (error) {
-    return next(error);
   }
 };

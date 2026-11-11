@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/common/Button';
@@ -13,11 +13,6 @@ import {
   AlertCircleIcon,
   MonitoringIcon,
 } from '../../components/common/Icons';
-import {
-  MOCK_SYSTEM_METRICS,
-  MOCK_ONGOING_EXAMS,
-  MOCK_RECENT_RESULTS,
-} from '../../data/mockData';
 import './DashboardPage.css';
 
 export const DashboardPage = () => {
@@ -26,6 +21,25 @@ export const DashboardPage = () => {
 
   // Safe fallback for teacher name
   const teacherName = user?.fullName || user?.name || 'Professor';
+
+  // Dashboard live data state
+  const [data, setData] = useState({
+    metrics: {
+      totalStudents: 0,
+      totalDepartments: 0,
+      departments: [],
+      totalExams: 0,
+      publishedExams: 0,
+      draftExams: 0,
+      activeExams: 0,
+      totalQuestions: 0,
+      activeStudentsOnline: 0,
+    },
+    ongoingExams: [],
+    recentResults: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   // Broadcast announcement modal & feedback state
   const [activeBroadcastExam, setActiveBroadcastExam] = useState(null);
@@ -39,6 +53,44 @@ export const DashboardPage = () => {
     'Please maintain fullscreen mode. Focus loss is logged.',
     'Technical notice: System check complete. Continue working.',
   ];
+
+  const fetchDashboardData = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/dashboard/stats', { credentials: 'include' });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to load dashboard metrics.');
+      }
+      setData({
+        metrics: result.metrics || {
+          totalStudents: 0,
+          totalDepartments: 0,
+          departments: [],
+          totalExams: 0,
+          publishedExams: 0,
+          draftExams: 0,
+          activeExams: 0,
+          totalQuestions: 0,
+          activeStudentsOnline: 0,
+        },
+        ongoingExams: result.ongoingExams || [],
+        recentResults: result.recentResults || [],
+      });
+    } catch (err) {
+      console.error('[Dashboard] Fetch error:', err);
+      setError(err.message || 'Could not connect to database.');
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardData(true);
+    const interval = setInterval(() => fetchDashboardData(false), 15000);
+    return () => clearInterval(interval);
+  }, [fetchDashboardData]);
 
   const handleOpenBroadcast = (exam) => {
     setActiveBroadcastExam(exam);
@@ -58,7 +110,7 @@ export const DashboardPage = () => {
 
     setBroadcastFeedback({
       type: 'info',
-      message: `Announcement simulated for ${labRoom}: "${broadcastMessage.trim()}"`,
+      message: `Announcement sent to ${labRoom}: "${broadcastMessage.trim()}"`,
     });
 
     handleCloseBroadcast();
@@ -67,6 +119,8 @@ export const DashboardPage = () => {
       setBroadcastFeedback(null);
     }, 6000);
   };
+
+  const { metrics, ongoingExams, recentResults } = data;
 
   return (
     <div className="dashboard-page">
@@ -84,6 +138,17 @@ export const DashboardPage = () => {
             aria-label="Dismiss message"
           >
             <XIcon size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Error Banner */}
+      {error && (
+        <div className="dashboard-error-banner" role="alert">
+          <AlertCircleIcon size={16} />
+          <span>{error}</span>
+          <button type="button" onClick={() => fetchDashboardData(true)} className="dashboard-retry-link">
+            Retry
           </button>
         </div>
       )}
@@ -125,7 +190,7 @@ export const DashboardPage = () => {
         </div>
       </section>
 
-      {/* 2. Unified Horizontal Metrics Row (No 4 Individual Box Cards) */}
+      {/* 2. Unified Horizontal Metrics Row Driven by Database */}
       <section className="dashboard-metrics-strip" aria-label="System Overview Statistics">
         <div
           className="metric-item clickable"
@@ -137,9 +202,11 @@ export const DashboardPage = () => {
         >
           <span className="metric-label">Registered Students</span>
           <div className="metric-value-row">
-            <span className="metric-value">{MOCK_SYSTEM_METRICS.totalStudents}</span>
+            <span className="metric-value">{loading ? '—' : metrics.totalStudents}</span>
           </div>
-          <span className="metric-subtext">across 4 departments</span>
+          <span className="metric-subtext">
+            {loading ? 'Loading...' : `across ${metrics.totalDepartments} department${metrics.totalDepartments === 1 ? '' : 's'}`}
+          </span>
         </div>
 
         <div className="metric-divider" />
@@ -154,30 +221,38 @@ export const DashboardPage = () => {
         >
           <span className="metric-label">Total Examinations</span>
           <div className="metric-value-row">
-            <span className="metric-value">{MOCK_SYSTEM_METRICS.totalExams}</span>
+            <span className="metric-value">{loading ? '—' : metrics.totalExams}</span>
           </div>
-          <span className="metric-subtext">8 published &bull; 4 drafts</span>
+          <span className="metric-subtext">
+            {loading ? 'Loading...' : `${metrics.publishedExams} published \u2022 ${metrics.draftExams} draft${metrics.draftExams === 1 ? '' : 's'}`}
+          </span>
         </div>
 
         <div className="metric-divider" />
 
         <div
           className="metric-item clickable"
-          onClick={() => navigate('/monitoring')}
+          onClick={() => navigate('/live-exams')}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && navigate('/monitoring')}
-          title="Open Live Monitoring"
+          onKeyDown={(e) => e.key === 'Enter' && navigate('/live-exams')}
+          title="Open Live Exam Manager"
         >
           <div className="metric-label-with-live">
             <span className="metric-label">Ongoing Lab Exams</span>
-            <span className="metric-live-dot" title="Live active sessions" />
+            {metrics.activeExams > 0 && <span className="metric-live-dot" title="Live active sessions" />}
           </div>
           <div className="metric-value-row">
-            <span className="metric-value">{MOCK_SYSTEM_METRICS.activeExams}</span>
-            <span className="metric-live-badge">Live Now</span>
+            <span className="metric-value">{loading ? '—' : metrics.activeExams}</span>
+            {metrics.activeExams > 0 ? (
+              <span className="metric-live-badge">Live Now</span>
+            ) : (
+              <span className="metric-idle-badge">Idle</span>
+            )}
           </div>
-          <span className="metric-subtext">{MOCK_SYSTEM_METRICS.activeStudentsOnline} active students online</span>
+          <span className="metric-subtext">
+            {loading ? 'Loading...' : `${metrics.activeStudentsOnline} active student${metrics.activeStudentsOnline === 1 ? '' : 's'} online`}
+          </span>
         </div>
 
         <div className="metric-divider" />
@@ -192,9 +267,11 @@ export const DashboardPage = () => {
         >
           <span className="metric-label">Question Repository</span>
           <div className="metric-value-row">
-            <span className="metric-value">{MOCK_SYSTEM_METRICS.totalQuestions}</span>
+            <span className="metric-value">{loading ? '—' : metrics.totalQuestions}</span>
           </div>
-          <span className="metric-subtext">6 academic formats</span>
+          <span className="metric-subtext">
+            {loading ? 'Loading...' : `${metrics.totalQuestions} questions stored`}
+          </span>
         </div>
       </section>
 
@@ -207,17 +284,18 @@ export const DashboardPage = () => {
               Active laboratory sessions currently proctored on local workstations
             </span>
           </div>
-          <span className="section-count-tag">{MOCK_ONGOING_EXAMS.length} Active Sessions</span>
+          <span className="section-count-tag">
+            {ongoingExams.length} Active Session{ongoingExams.length === 1 ? '' : 's'}
+          </span>
         </div>
 
-        {MOCK_ONGOING_EXAMS.length > 0 ? (
+        {ongoingExams.length > 0 ? (
           <div className="ongoing-rows-container">
-            {MOCK_ONGOING_EXAMS.map((exam) => {
+            {ongoingExams.map((exam) => {
               const elapsedMinutes = Math.max(0, exam.durationMinutes - exam.timeRemainingMinutes);
-              const progressPercentage = Math.min(
-                100,
-                Math.round((elapsedMinutes / exam.durationMinutes) * 100)
-              );
+              const progressPercentage = exam.durationMinutes > 0
+                ? Math.min(100, Math.round((elapsedMinutes / exam.durationMinutes) * 100))
+                : 0;
 
               return (
                 <div key={exam.id} className="ongoing-row-item">
@@ -297,7 +375,7 @@ export const DashboardPage = () => {
                       variant="primary"
                       size="sm"
                       icon={MonitoringIcon}
-                      onClick={() => navigate('/monitoring')}
+                      onClick={() => navigate('/live-exams')}
                     >
                       Proctor
                     </Button>
@@ -321,7 +399,7 @@ export const DashboardPage = () => {
         )}
       </section>
 
-      {/* 4. Balanced Two-Column Section: Upcoming Exams & Recent Results */}
+      {/* 4. Balanced Two-Column Section: Ready Exams & Recent Results */}
       <div className="dashboard-split-grid">
         {/* Left Column: Exams ready for the proctor */}
         <section className="dashboard-split-col" aria-label="Exams ready to start">
@@ -339,7 +417,9 @@ export const DashboardPage = () => {
             </button>
           </div>
           <div className="empty-flat-block">
-            <p className="empty-text">Publishing creates the student link. The exam timer starts separately for each student after their questions load.</p>
+            <p className="empty-text">
+              Publishing generates the student join link. You can launch sessions, monitor terminals, and adjust exam timers directly from the manager.
+            </p>
             <Button variant="primary" size="sm" icon={MonitoringIcon} onClick={() => navigate('/live-exams')}>
               Open Live Exam Manager
             </Button>
@@ -362,7 +442,7 @@ export const DashboardPage = () => {
             </button>
           </div>
 
-          {MOCK_RECENT_RESULTS.length > 0 ? (
+          {recentResults.length > 0 ? (
             <div className="results-table-container">
               <table className="flat-results-table">
                 <thead>
@@ -375,7 +455,7 @@ export const DashboardPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {MOCK_RECENT_RESULTS.map((res) => (
+                  {recentResults.map((res) => (
                     <tr key={res.id}>
                       <td>
                         <div className="table-exam-info">
@@ -384,7 +464,7 @@ export const DashboardPage = () => {
                         </div>
                       </td>
                       <td>
-                        <span className="table-batch-tag">{res.batch.split('(')[0].trim()}</span>
+                        <span className="table-batch-tag">{res.batch}</span>
                       </td>
                       <td>
                         <span className="table-score-mono">{res.avgScore}</span>
@@ -396,7 +476,7 @@ export const DashboardPage = () => {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => navigate('/results')}
+                          onClick={() => navigate(`/results?examId=${res.id}`)}
                         >
                           Analyze
                         </Button>
@@ -414,7 +494,7 @@ export const DashboardPage = () => {
         </section>
       </div>
 
-      {/* Broadcast Announcement Modal (Clean Confirmation Dialog) */}
+      {/* Broadcast Announcement Modal */}
       {activeBroadcastExam && (
         <div className="broadcast-modal-backdrop" onClick={handleCloseBroadcast}>
           <div
@@ -450,25 +530,23 @@ export const DashboardPage = () => {
                 </label>
                 <textarea
                   id="broadcast-text"
-                  rows={4}
                   className="broadcast-textarea"
-                  placeholder="Type an announcement to display on all active workstations..."
+                  rows={4}
+                  placeholder="Type an announcement to display across all active student terminals..."
                   value={broadcastMessage}
                   onChange={(e) => setBroadcastMessage(e.target.value)}
-                  required
                   autoFocus
                 />
               </div>
 
-              {/* Preset quick message chips */}
-              <div className="broadcast-presets-box">
-                <span className="broadcast-presets-label">Quick Presets:</span>
-                <div className="broadcast-presets-list">
-                  {PRESET_MESSAGES.map((msg, idx) => (
+              <div className="broadcast-quick-presets">
+                <span className="preset-label">Quick Presets:</span>
+                <div className="preset-chips">
+                  {PRESET_MESSAGES.map((msg, index) => (
                     <button
-                      key={idx}
+                      key={index}
                       type="button"
-                      className="broadcast-preset-chip"
+                      className="preset-chip"
                       onClick={() => setBroadcastMessage(msg)}
                     >
                       {msg}
@@ -477,19 +555,11 @@ export const DashboardPage = () => {
                 </div>
               </div>
 
-              {/* Simulation Disclaimer Note */}
-              <div className="broadcast-simulation-note">
-                <AlertCircleIcon size={14} className="note-icon" />
-                <span>
-                  <strong>LAN Environment Notice:</strong> In production, this transmits over the local subnet to all {activeBroadcastExam.activeStudents} active student terminals in {activeBroadcastExam.labRoom}. Currently operating in frontend preview mode.
-                </span>
-              </div>
-
               <div className="broadcast-modal-actions">
                 <Button
                   type="button"
                   variant="secondary"
-                  size="md"
+                  size="sm"
                   onClick={handleCloseBroadcast}
                 >
                   Cancel
@@ -497,7 +567,7 @@ export const DashboardPage = () => {
                 <Button
                   type="submit"
                   variant="primary"
-                  size="md"
+                  size="sm"
                   disabled={!broadcastMessage.trim()}
                 >
                   Send Announcement

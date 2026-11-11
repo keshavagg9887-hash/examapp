@@ -1,112 +1,155 @@
 /* Student Roster Page Styling */
 
 .roster-page {
-  padding: var(--spacing-4);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 4px 0 24px 0;
 }
 
-.toolbar {
+.roster-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.roster-subtitle {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.roster-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--danger-light, #fef2f2);
+  border: 1px solid var(--danger-border, #fecaca);
+  color: var(--danger-text, #991b1b);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-size: 0.8125rem;
+}
+
+.roster-retry-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Query Filters Toolbar */
+.roster-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--spacing-3);
-  margin-bottom: var(--spacing-3);
-  align-items: center;
-}
-
-.roster-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.roster-table th,
-.roster-table td {
-  padding: var(--spacing-2);
-  text-align: left;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: var(--font-size-sm);
-}
-
-.roster-table th {
+  gap: 12px;
+  align-items: flex-end;
   background-color: var(--bg-surface);
-  font-weight: var(--font-weight-medium);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px;
 }
 
-.action-cell {
-  display: flex;
-  gap: var(--spacing-2);
+.roster-toolbar .search-field-wrap {
+  flex: 1 1 240px;
 }
 
-.edit-panel,
-.add-panel {
-  margin-top: var(--spacing-4);
-  padding: var(--spacing-3);
+.roster-toolbar .form-group {
+  margin-bottom: 0;
+  flex: 1 1 160px;
+}
+
+/* Table Wrapper */
+.roster-table-wrapper {
+  overflow-x: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background-color: var(--bg-surface);
 }
 
-.detail-actions {
-  display: flex;
-  gap: var(--spacing-3);
-  margin-top: var(--spacing-3);
+.roster-table-wrapper .student-table {
+  margin-top: 0;
+  border: none;
 }
 
-/* Decrease padding for Save and Cancel buttons in edit panel */
-.detail-actions .btn {
-  padding-left: var(--spacing-2);
-  padding-right: var(--spacing-2);
-  padding-top: var(--spacing-0);
-  padding-bottom: var(--spacing-0);
+.roster-table-wrapper .student-table th {
+  background-color: var(--bg-muted);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-
-.file-upload {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-3);
-  cursor: pointer;
+.roster-table-wrapper .student-table td {
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.8125rem;
   color: var(--text-primary);
 }
 
-.editing {
-  background-color: var(--bg-muted);
+.roster-table-wrapper .student-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
-/* Exam Participation History styling */
-.edit-panel h4 {
-  margin-top: var(--spacing-3);
-  margin-bottom: var(--spacing-2);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
+/* Pagination Bar */
+.roster-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
-.edit-panel ul {
-  list-style: disc;
-  padding-left: var(--spacing-4);
-  margin: 0;
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.edit-panel li {
-  margin-bottom: var(--spacing-1);
-  font-size: var(--font-size-sm);
-  line-height: 1.4;
+.pagination-current-page {
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
-/* Exam Participation History styling */
-.edit-panel h4 {
-  margin-top: var(--spacing-3);
-  margin-bottom: var(--spacing-2);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
+/* States */
+.roster-loading-state,
+.roster-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  background-color: var(--bg-surface);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--text-secondary);
 }
 
-.edit-panel ul {
-  list-style: disc;
-  padding-left: var(--spacing-4);
-  margin: 0;
+.roster-empty-state .empty-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
-.edit-panel li {
-  margin-bottom: var(--spacing-1);
-  font-size: var(--font-size-sm);
-  line-height: 1.4;
+.roster-empty-state .empty-desc {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  max-width: 420px;
+  margin-bottom: 16px;
 }

@@ -8,6 +8,9 @@ import authRouter from './routers/authRouter.js';
 import examRouter from './routers/examRouter.js';
 import questionBankRouter from './routers/questionBankRouter.js';
 import studentExamRouter from './routers/studentExamRouter.js';
+import dashboardRouter from './routers/dashboardRouter.js';
+import studentRosterRouter from './routers/studentRosterRouter.js';
+import resultsRouter from './routers/resultsRouter.js';
 import { isAuthenticated } from './middlewares/authMiddleware.js';
 import { notFound, errorHandler } from './middlewares/errorMiddleware.js';
 import { createSocketServer } from './realtime/socketServer.js';
@@ -69,6 +72,9 @@ app.use('/api', isAuthenticated);
 // Folder and question APIs use the signed-in teacher's automatically provisioned bank.
 app.use('/api/question-bank', questionBankRouter);
 app.use('/api/exams', examRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/students', studentRosterRouter);
+app.use('/api/results', resultsRouter);
 
 
 

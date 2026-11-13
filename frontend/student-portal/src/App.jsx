@@ -318,7 +318,6 @@ function App() {
     ? ''
     : `${String(Math.floor(remainingSeconds / 3600)).padStart(2, '0')}:${String(Math.floor((remainingSeconds % 3600) / 60)).padStart(2, '0')}:${String(remainingSeconds % 60).padStart(2, '0')}`;
   const currentQuestion = questions[currentQuestionIndex];
-  const answeredCount = questions.filter((question) => question.selectedOptionIds?.length > 0).length;
 
   return (
     <main className={`student-shell ${attemptStarted && liveSession.status === 'live' ? 'exam-mode-shell' : ''}`}>
@@ -361,7 +360,14 @@ function App() {
             )}
             {student ? (
               <div className="student-exam-state">
-                {warning && <div className="notice warning-notice"><strong>Message from your teacher</strong><p>{warning}</p></div>}
+                {warning && <div className="warning-backdrop" role="presentation">
+                  <section className="warning-dialog" role="alertdialog" aria-modal="true" aria-labelledby="teacher-warning-title">
+                    <div className="warning-dialog-icon" aria-hidden="true">!</div>
+                    <h2 id="teacher-warning-title">Message from your teacher</h2>
+                    <p>{warning}</p>
+                    <button type="button" className="jee-primary-button" onClick={() => setWarning('')}>I understand</button>
+                  </section>
+                </div>}
                 {terminated ? (
                   <div className="notice error-notice"><h2>Attempt locked</h2><p>{terminatedMessage || 'This exam attempt has ended and cannot be reopened.'}</p>{result && <p>Score: {result.score} / {result.totalMarks ?? exam.total_marks}</p>}</div>
                 ) : result ? (
@@ -394,14 +400,13 @@ function App() {
                       <div className="jee-topbar">
                         <div><span>QUESTION</span><strong>{String(currentQuestionIndex + 1).padStart(2, '0')} <small>/ {String(questions.length).padStart(2, '0')}</small></strong></div>
                         <div><span>TIME LEFT</span><strong>{remainingLabel || '—'}</strong></div>
-                        <div className="jee-topbar-progress"><span>ANSWERED</span><strong>{answeredCount} / {questions.length}</strong></div>
                       </div>
                       {answerError && <div className="join-error" role="alert">{answerError}</div>}
                       {!currentQuestion ? <p className="lead">Loading questions…</p> : (
                         <article className="jee-question" key={currentQuestion.id}>
                           <div className="jee-question-heading">
                             <span>QUESTION {String(currentQuestionIndex + 1).padStart(2, '0')}</span>
-                            <span>{currentQuestion.marks} MARKS · {currentQuestion.type === 'mcq_multi' ? 'SELECT ALL THAT APPLY' : 'SINGLE CORRECT'}</span>
+                            <span>CORRECT: +{currentQuestion.marks} MARKS | INCORRECT: 0 · {currentQuestion.type === 'mcq_multi' ? 'SELECT ALL THAT APPLY' : 'SINGLE CORRECT'}</span>
                           </div>
                           <h2>{currentQuestion.statement}</h2>
                           <div className="jee-options">

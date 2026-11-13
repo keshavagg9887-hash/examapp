@@ -98,3 +98,20 @@
   .jee-primary-button, .jee-secondary-button { flex: 1; padding: 0 10px; }
   .exam-mode-card { padding: 22px 16px; }
 }
+
+/* Keep the active attempt focused on the question, timer, and navigation. */
+.exam-mode-shell .student-header, .exam-mode-shell > footer,
+.exam-mode-card > .eyebrow, .exam-mode-card > h1, .exam-mode-card > .lead,
+.exam-mode-card > .exam-facts, .exam-mode-card > .instructions,
+.exam-mode-card .student-exam-state > .notice { display: none; }
+.exam-mode-shell { padding: 0; }
+.exam-mode-card { width: 100%; min-height: 100vh; margin: 0; padding: clamp(18px, 3vw, 40px); border: 0; border-radius: 0; box-shadow: none; }
+.exam-mode-card .student-exam-state, .exam-mode-card .student-quiz { width: 100%; }
+.exam-mode-card .jee-topbar { justify-content: space-between; }
+.exam-mode-card .jee-topbar-progress { display: none; }
+.warning-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: #101a2db8; }
+.warning-dialog { display: grid; justify-items: center; gap: 12px; width: min(100%, 440px); padding: 30px; border: 1px solid #f0dcad; border-radius: 18px; background: #fff; box-shadow: 0 24px 80px #101a2d45; text-align: center; }
+.warning-dialog-icon { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 50%; background: #fff4d9; color: #9a6713; font-size: 26px; font-weight: 800; }
+.warning-dialog h2 { margin: 0; color: #202b45; font-size: 20px; }
+.warning-dialog p { margin: 0 0 6px; color: #59657d; line-height: 1.6; white-space: pre-wrap; }
+@media (max-width: 700px) { .exam-mode-card { padding: 18px 14px; } }
